@@ -10,7 +10,7 @@ Rhino 8 uses .NET 8 via Microsoft's CLR, which was not working when trying to ru
 
 `err:virtual:virtual_setup_exception stack overflow 4672 bytes addr 0x6ffffff85ebe stack 0x7ffffe0ffdc0 (0x7ffffe100000-0x7ffffe101000-0x7ffffe200000)`
 
-Wine's dlls/ntdll/unix/virtual.c mishandles thread stack allocation requests from .NET Core. It creates 4KB thread stacks instead of 1MB+, causing an immediate stack overflow during coreclr initialization when Rhino 8 launches. Rhino 8 uses .NET Core while Rhino 7 uses .NET Framework). The solution was to patch the following Wine files & a .dll invoked by Rhino 8.
+Wine's `dlls/ntdll/unix/virtual.c` mishandles thread stack allocation requests from .NET Core. It creates 4KB thread stacks instead of 1MB+, causing an immediate stack overflow during coreclr initialization when Rhino 8 launches. Rhino 8 uses .NET Core while Rhino 7 uses .NET Framework). The solution was to patch the following Wine files & a .dll invoked by Rhino 8.
 
 1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine. Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
 2. **.NET calibrates recursion depth from `VirtualQuery`** — if Wine reports a stack larger than 1MB, .NET calibrates aggressively and overflows. Patched `ntdll` to clamp the reported stack size to 1MB.
