@@ -6,21 +6,17 @@ Tested on **Ubuntu 24.04.4 LTS (Noble Numbat)**, kernel 6.17, with Rhino **8.31.
 
 _Note: Claude Code was used in this project._
 
-Rhino 8 uses .NET 8 via Microsoft's CLR, which was not working when trying to run with Wine. Initially, installation was successful however a stack overflow would occur when trying to run Rhino 8:
+Rhino 8 uses .NET 8 via Microsoft's CLR, which has requirements that Wine doesn't meet out of the box. The first symptom is a stack overflow on startup before any UI appears:
 
 `err:virtual:virtual_setup_exception stack overflow 4672 bytes addr 0x6ffffff85ebe stack 0x7ffffe0ffdc0 (0x7ffffe100000-0x7ffffe101000-0x7ffffe200000)`
 
-Wine's dlls/ntdll/unix/virtual.c mishandles thread stack allocation requests from .NET Core. It creates 4KB thread stacks instead of 1MB+, causing an immediate stack overflow during coreclr initialization when Rhino 8 launches.
-Rhino 8 uses .NET Core while Rhino 7 uses .NET Framework).
+Five distinct problems had to be solved to get it working:
 
-The solution was to patch the following Wine files & a .dll invoked by Rhino 8.
-
-1. **.NET 8 requires ~512MB of reserved stack space** — Wine defaults to 1MB. Patched `ntdll` to force 512MB stacks on all threads.
-2. **.NET calibrates recursion depth from `VirtualQuery`** — with a 512MB stack it would try to use all of it and overflow. Patched `ntdll` to clamp the reported stack size to 1MB so .NET calibrates correctly.
-3. **Stack overflow exception frames couldn't be delivered** — with large stacks the guard page was too close to the stack bottom to fit an exception frame. Moved the guard page to +64KB.
-4. **Dark mode detection caused 254,955-deep mutual recursion** — `rhcommon_c.dll`'s `RHC_RhOSInDarkMode` and the managed `get_DarkMode()` called each other indefinitely on Wine. Fixed with a binary patch to make it always return light mode.
-5. **Wine can't verify Microsoft Authenticode signatures** — missing CA root store causes installer verification to fail. Patched `wintrust` to return success while still populating certificate state.
-6. **OAuth licensing callback (port 1717) never bound** — stale `http.sys` state from a previous run blocked the port. Fixed by killing the wineserver before launch.
+1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine. Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
+2. **.NET calibrates recursion depth from `VirtualQuery`** — if Wine reports a stack larger than 1MB, .NET calibrates aggressively and overflows. Patched `ntdll` to clamp the reported stack size to 1MB.
+3. **Dark mode detection caused 254,955-deep mutual recursion** — `rhcommon_c.dll`'s `RHC_RhOSInDarkMode` and the managed `get_DarkMode()` called each other indefinitely on Wine. Fixed with a binary patch to make it always return light mode.
+4. **Wine can't verify Microsoft Authenticode signatures** — missing CA root store causes installer verification to fail. Patched `wintrust` to return success while still populating certificate state.
+5. **OAuth licensing callback (port 1717) never bound** — stale `http.sys` state from a previous run blocked the port. Fixed by killing the wineserver before launch.
 
 See [WINE_PORTING_NOTES.md](WINE_PORTING_NOTES.md) for a detailed writeup of each problem.
 
