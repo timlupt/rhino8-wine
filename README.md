@@ -82,7 +82,7 @@ sudo make install
 
 ---
 
-### Arch Linux (untested)
+### Arch Linux
 
 #### 1. Install build dependencies
 

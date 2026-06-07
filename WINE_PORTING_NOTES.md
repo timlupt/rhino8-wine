@@ -33,7 +33,19 @@ if (clamped > (char *)teb->DeallocationStack &&
 
 This is a no-op for standard 1 MB stacks (where `clamped == DeallocationStack`) but protects against PE headers that request larger stacks.
 
-> **Note:** An earlier version of this patch also reserved 512 MB for native 64-bit stacks. Testing confirmed this is not required — Rhino launches and runs correctly with default stack sizes. The 512 MB reservation has been removed.
+> **A red herring — the opaque `virtual_setup_exception` crash:** While chasing this, a *different*-looking crash sometimes appeared instead of a clean `STATUS_STACK_OVERFLOW`:
+>
+> ```
+> err:virtual:virtual_setup_exception stack overflow 4672 bytes addr 0x6ffffff85ebe stack 0x7ffffe0ffdc0 (0x7ffffe100000-0x7ffffe101000-0x7ffffe200000)
+> ```
+>
+> This is *not* a normal overflow delivery — it's Wine's own signal handler double-faulting while trying to build the exception frame, because whatever was overflowing blew straight through the guard page *and* the small "guaranteed region" beneath it (just one host page, ~4 KB) before Wine could catch it. The result is an opaque internal abort with no managed stack trace — which looks exactly like "the stack is too small."
+>
+> It wasn't. The actual cause of *that* overflow was the dark-mode mutual-recursion bug described in Problem 2 below — hundreds of thousands of frames deep, recursing fast enough to blow through everything before an exception frame could be set up. We initially chased it as a stack-*sizing* problem: forcing native 64-bit stacks to reserve 512 MB and moving the guard page to `+64 KB` (instead of the default ~4 KB) didn't fix anything by itself, but it gave the runaway recursion enough room that the resulting `STATUS_STACK_OVERFLOW` could finally be delivered *cleanly* — complete with a full managed stack trace pointing straight at `Rhino.Runtime.AdvancedSettings.get_DarkMode()` ↔ `RHC_RhOSInDarkMode`. That trace is what led to the real fix in Problem 2.
+>
+> Once the recursion itself is eliminated by the binary patch in Problem 2, there's nothing left to overflow any stack — Wine's normal default native stack size is sufficient, and no 512 MB reservation or guard-page repositioning is needed. (Confirmed on Arch: with only the WoW64 8 MB fix above plus the DLL patch from Problem 2 — and none of the 512 MB/guard-page changes — Rhino launches cleanly.)
+>
+> If you ever see `virtual_setup_exception stack overflow ... bytes` rather than a clean, managed `STATUS_STACK_OVERFLOW` with a stack trace, treat it as a symptom of runaway recursion *somewhere upstream* rather than a sign that stacks need to be bigger — the fix is to find and stop the recursion, not to give it more room to run in.
 
 ---
 

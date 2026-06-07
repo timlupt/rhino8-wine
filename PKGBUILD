@@ -81,8 +81,12 @@ prepare() {
 }
 
 build() {
+  rm -rf build
   mkdir -p build
   cd build
+
+  export CFLAGS="${CFLAGS} -fno-lto"
+  export LDFLAGS="${LDFLAGS} -fno-lto"
 
   "../wine-src/configure" \
     --prefix=/opt/wine-rhino8 \
