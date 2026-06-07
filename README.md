@@ -160,4 +160,4 @@ This kills and restarts the wineserver, resetting the internal HTTP server state
 
 ### Arch Linux
 
-![Rhino 8 running on Arch Linux](arch_about_screenshot.png)
+![Rhino 8 running on Arch Linux](arch_desktop_screenshot.png)
