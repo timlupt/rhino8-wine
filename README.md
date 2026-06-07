@@ -154,4 +154,10 @@ If the licensing OAuth flow fails (Firefox redirects to `http://127.0.0.1:1717/`
 
 This kills and restarts the wineserver, resetting the internal HTTP server state that handles the OAuth callback.
 
-![Rhino 8 running on Linux](desktop_screenshot.jpeg)
+### Ubuntu 24.04
+
+![Rhino 8 running on Ubuntu](desktop_screenshot.jpeg)
+
+### Arch Linux
+
+![Rhino 8 running on Arch Linux](arch_about_screenshot.png)
