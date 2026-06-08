@@ -15,6 +15,9 @@ Patches:
 1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine. Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
 2. **.NET calibrates recursion depth from `VirtualQuery`** — if Wine reports a stack larger than 1MB, .NET calibrates aggressively and overflows. Patched `ntdll` to clamp the reported stack size to 1MB.
 3. **Dark mode detection caused 254,955-deep mutual recursion** — `rhcommon_c.dll`'s `RHC_RhOSInDarkMode` and the managed `get_DarkMode()` called each other indefinitely on Wine. Fixed with a binary patch to make it always return light mode.
+
+Environment Specific Issues:
+
 4. **Wine can't verify Microsoft Authenticode signatures** — missing CA root store causes installer verification to fail. Patched `wintrust` to return success while still populating certificate state.
 5. **OAuth licensing callback (port 1717) never bound** — stale `http.sys` state from a previous run blocked the port. Fixed by killing the wineserver before launch.
 
