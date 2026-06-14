@@ -143,6 +143,11 @@ printf '\x31\xc0\xc3\x90\x90\x90\x90' | \
 
 This replaces the `RHC_RhOSInDarkMode` JMP thunk with `xor eax,eax; ret` (always returns light mode), preventing the mutual recursion crash.
 
+If you're on a different Rhino 8 build and this offset doesn't match (or the
+crash persists), use [`find-darkmode-patch.sh`](find-darkmode-patch.sh) to
+relocate the export and patch it automatically — see the
+[Rhino 9 WIP](#rhino-9-wip-experimental) section below for usage.
+
 ### 5. Run Rhino
 
 ```bash
@@ -164,3 +169,53 @@ This kills and restarts the wineserver, resetting the internal HTTP server state
 ### Arch Linux
 
 ![Rhino 8 running on Arch Linux](arch_desktop_screenshot.png)
+
+---
+
+## Rhino 9 WIP (Experimental)
+
+The same `wine-rhino8` build also runs the Rhino 9 WIP installer and Rhino 9
+itself — no source patches needed updating. Two extra steps are required
+beyond the Rhino 8 instructions above. Rhino 9 WIP changes frequently; see
+[WINE_PORTING_NOTES.md](WINE_PORTING_NOTES.md#rhino-9-wip-experimental) for
+the details and version-specific numbers behind these steps.
+
+Use a separate prefix so your working Rhino 8 setup is unaffected:
+
+```bash
+export WINEPREFIX=~/.local/share/wineprefixes/rhino9wip
+export WINE=/opt/wine-rhino8/bin/wine
+
+WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE wineboot
+
+# Run the Rhino 9 WIP installer (GUI, needs a real X11/Wayland session —
+# even with /quiet, Burn's bootstrapper requires a window and will hang
+# without one)
+WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE /path/to/rhino_9.x.x.x.exe
+```
+
+### 1. Patch `rhcommon_c.dll` (dark-mode recursion)
+
+Same underlying bug as Rhino 8's dark-mode patch, but at a different offset
+in this DLL build. Use the helper script instead of a hardcoded offset:
+
+```bash
+./find-darkmode-patch.sh "$WINEPREFIX/drive_c/Program Files/Rhino 9 WIP/System/rhcommon_c.dll" --apply
+```
+
+### 2. If viewports render incorrectly, try switching GPU Technology to OpenGL
+
+Rhino 9 WIP defaults to Direct3D for viewport rendering. On at least one
+tested system (Nvidia, Wayland/XWayland), this rendered incorrectly under
+Wine (red/black viewports, objects vanishing after the command that created
+them finishes); switching to OpenGL fixed it. This is likely
+platform-dependent (GPU vendor/driver/Vulkan setup), so your mileage may
+vary. If you hit similar symptoms: **Options → View → GPU → GPU Technology →
+OpenGL**, then restart Rhino.
+
+### 3. Run Rhino 9
+
+```bash
+DISPLAY="${DISPLAY:-:0}" WINEPREFIX=$WINEPREFIX $WINE \
+  "$WINEPREFIX/drive_c/Program Files/Rhino 9 WIP/System/Rhino.exe"
+```

@@ -97,3 +97,92 @@ Always returns 0 (light mode), breaking the recursion. Back up the DLL before pa
 | `dlls/wintrust/wintrust_main.c` | Override Authenticode result to S_OK (Wine lacks MS CA root store needed to verify Microsoft signatures) |
 
 All changes are in `rhino8-wine.patch`.
+
+---
+
+## Rhino 9 WIP (Experimental)
+
+The patches and DLL-patching approach above were tested against a Rhino 9
+WIP build (**9.0.26160.12305**) using the same `wine-rhino8` build (Wine
+11.9 + `rhino8-wine.patch`, unchanged — no source patches needed updating).
+Summary: it works, with two additional steps. Rhino 9 WIP changes rapidly,
+so treat the specifics below as a snapshot of this build, not a guarantee
+for future ones.
+
+### .NET 8 → .NET 10
+
+Rhino 9 WIP bundles/requires the **.NET 10** desktop and ASP.NET Core
+runtimes (`Microsoft.WindowsDesktop.App 10.0.2`, `Microsoft.AspNetCore.App
+10.0.2`), not .NET 8. Despite that major jump, the existing `ntdll` patches —
+the 8 MB WoW64 stack minimum and the 1 MB `VirtualQuery` clamp — remain
+sufficient. No new stack-size patch was needed for .NET 10, once the
+recursion below is fixed.
+
+### `wintrust` Authenticode patch generalizes
+
+The Rhino 9 WIP installer (a WiX Burn bundle, same as Rhino 8) completes its
+Detect and Plan phases with zero certificate/signature errors under the
+patched `wintrust`. The Authenticode override is not Rhino-8-specific.
+
+### Dark-mode recursion recurs — at a new offset
+
+Rhino 9's `rhcommon_c.dll` has the same `RHC_RhOSInDarkMode` JMP-thunk
+(`48 ff 25 ?? ?? ?? ?? cc`) causing the same mutual-recursion stack overflow
+described in Problem 2 above — confirmed by the same opaque
+`err:virtual:virtual_setup_exception stack overflow ... bytes` signature
+(a 1 MB-span stack, i.e. the recursion overflows before our 8 MB WoW64 patch
+would even matter) on launch. The export lives at a different location in
+this build:
+
+| | Rhino 8 (8.31.26126.13431) | Rhino 9 WIP (9.0.26160.12305) |
+|---|---|---|
+| RVA | `0xe0b50` | `0x136c40` |
+| File offset | `0xdff50` | `0x136040` |
+
+Because this offset shifts between builds, use
+[`find-darkmode-patch.sh`](find-darkmode-patch.sh) instead of a hardcoded
+offset:
+
+```bash
+./find-darkmode-patch.sh "$WINEPREFIX/drive_c/Program Files/Rhino 9 WIP/System/rhcommon_c.dll" --apply
+```
+
+It locates the export via the DLL's own export table and section headers,
+verifies it's still the patchable JMP-thunk shape, backs up the original to
+`rhcommon_c.dll.bak`, and applies the same `xor eax,eax; ret` patch as
+Problem 2.
+
+### GPU Technology: Direct3D rendering issues (platform-dependent?)
+
+Rhino 9 WIP defaults to **Direct3D** for viewport rendering (Rhino 8 used
+OpenGL). On the system this was tested on (Nvidia, Wayland/XWayland), Direct3D
+mode ran without crashing but rendered incorrectly: some viewports showed
+solid red or black, and objects vanished after the command that created them
+finished (dynamic/preview drawing worked during the command, final scene
+rendering did not).
+
+Switching **Options → View → GPU → GPU Technology** to **OpenGL** (and
+restarting Rhino) fixed this completely on this system — all viewports
+rendered correctly and objects persisted after commands completed.
+
+Direct3D under Wine goes through `wined3d`/`vkd3d`, whose D3D11/D3D12 support
+varies a lot by GPU vendor, driver (proprietary vs. Mesa), and Vulkan setup —
+so this may or may not reproduce on other hardware/driver combinations. If
+you hit similar symptoms (vanishing geometry, solid-color viewports), try
+switching to OpenGL as above. Either way this isn't something addressable
+with a small binary patch like the dark-mode fix above.
+
+### Known pre-existing issue: delayed viewport refresh
+
+Independent of the above, Rhino 8 and 9 both show occasional delayed
+viewport refreshes on Wine/Wayland/Nvidia. The documented community
+workarounds (disabling theming, disabling vblank) did not resolve it here.
+This is a general Wine/Wayland/Nvidia compositor interaction issue, not
+specific to these patches.
+
+### Burn installer still needs a real display
+
+As with Rhino 8, the WiX Burn bootstrapper requires a window handle to reach
+its Apply phase — even with `/quiet` it fails with `BA passed NULL hwndParent
+to Apply` and hangs if no display is available. The installer must be run
+under a real X11/Wayland session.
