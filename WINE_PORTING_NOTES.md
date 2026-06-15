@@ -6,32 +6,35 @@ Detailed writeup of every problem encountered getting Rhinoceros 8 running under
 
 ## What Was Changed and Why
 
-### Problem 1: Immediate Crash — Stack Overflow
+### Problem 1: Immediate Crash — Stack Overflow (turned out to be Problem 2)
 
-**Symptom:** Rhino crashed on startup before showing any UI. Wine logged a STATUS_STACK_OVERFLOW exception.
+**Symptom:** Rhino crashed on startup with `STATUS_STACK_OVERFLOW` /
+`err:virtual:virtual_setup_exception stack overflow … bytes`, before any UI.
 
-**Root cause:** .NET 8's CLR uses WoW64 (32-bit subsystem) for some initialization. Wine's default WoW64 thread stacks are 1 MB, which is insufficient for the .NET 8 CLR bootstrap call depth on Wine. The overflow occurs in a 32-bit thread before Rhino's main window appears.
+**Root cause:** the dark-mode mutual recursion described in **Problem 2** —
+hundreds of thousands of frames deep. It was never a stack-*sizing* problem. The
+whole stack investigation this section once documented was chasing the wrong
+cause.
 
-**Fix — Raise WoW64 32-bit stack minimum to 8 MB** (`dlls/ntdll/unix/thread.c` → `init_thread_stack`):
+**Resolution:** fixed at the source by Problem 2 (the `uxtheme` exports). With
+the recursion gone, Wine's default stack sizes are sufficient, and **every**
+stack patch tried during the chase has since been removed — none survives:
 
-```c
-if (reserve_size < 8 * 1024 * 1024) reserve_size = 8 * 1024 * 1024;
-```
+- **512 MB native reservation + guard-page move + StackLimit clamp** — removed
+  in commit `600e4d2`; never required.
+- **VirtualQuery `AllocationBase` clamp** (`virtual.c`) — removed 2026-06-15. A
+  near-no-op for the ~1 MB 64-bit stacks Rhino actually uses, and never
+  upstreamable (it made `VirtualQuery` report a deliberately false value).
+- **8 MB WoW64 (32-bit) stack minimum** (`thread.c`) — removed 2026-06-15. It
+  only affected the 32-bit WoW64 path — i.e. the **32-bit Rhino installer**
+  (`rhino_en-us_*.exe` is a PE32/i386 WiX Burn bundle), not Rhino's 64-bit
+  runtime. **Verified:** with it removed, the installer completes a full install
+  on a default 1 MB stack with no overflow. (The earlier claim that this fixed
+  "a 32-bit thread during Rhino startup" was wrong on both counts — it was the
+  installer, and the installer didn't need it either.)
 
-This applies only to the WoW64 (32-bit) stack path and does not affect native 64-bit threads.
-
-**Removed (2026-06-15) — VirtualQuery `AllocationBase` clamp** (`dlls/ntdll/unix/virtual.c` → `fill_basic_memory_info`):
-
-An earlier defensive patch clamped the stack size reported by
-`VirtualQuery`/`NtQueryVirtualMemory` to ~1 MB (by reporting `AllocationBase`
-as `StackBase − 1 MB`), on the theory that .NET calibrates its maximum
-recursion depth from it and could overflow if Wine reported a larger stack.
-After the dark-mode fix (Problem 2) eliminated the only runaway recursion, the
-clamp proved unnecessary: Rhino 8's 64-bit threads already get ~1 MB stacks, so
-it was a near-no-op. It was **removed** — Rhino launches cleanly without it
-(heavier recursion-depth stress testing still pending). It was never
-upstreamable anyway, since it made `VirtualQuery` report a deliberately false
-`AllocationBase`; see the upstreaming-triage section below.
+Net: Problem 1 leaves **no surviving source changes**. Every ntdll/native patch
+that ever existed here was a red herring for Problem 2.
 
 > **A red herring — the opaque `virtual_setup_exception` crash:** While chasing this, a *different*-looking crash sometimes appeared instead of a clean `STATUS_STACK_OVERFLOW`:
 >
@@ -43,7 +46,7 @@ upstreamable anyway, since it made `VirtualQuery` report a deliberately false
 >
 > It wasn't. The actual cause of *that* overflow was the dark-mode mutual-recursion bug described in Problem 2 below — hundreds of thousands of frames deep, recursing fast enough to blow through everything before an exception frame could be set up. We initially chased it as a stack-*sizing* problem: forcing native 64-bit stacks to reserve 512 MB and moving the guard page to `+64 KB` (instead of the default ~4 KB) didn't fix anything by itself, but it gave the runaway recursion enough room that the resulting `STATUS_STACK_OVERFLOW` could finally be delivered *cleanly* — complete with a full managed stack trace pointing straight at `Rhino.Runtime.AdvancedSettings.get_DarkMode()` ↔ `RHC_RhOSInDarkMode`. That trace is what led to the real fix in Problem 2.
 >
-> Once the recursion itself is eliminated by the binary patch in Problem 2, there's nothing left to overflow any stack — Wine's normal default native stack size is sufficient, and no 512 MB reservation or guard-page repositioning is needed. (Confirmed on Arch: with only the WoW64 8 MB fix above plus the DLL patch from Problem 2 — and none of the 512 MB/guard-page changes — Rhino launches cleanly.)
+> Once the recursion itself is eliminated (Problem 2's `uxtheme` fix), there's nothing left to overflow any stack — Wine's normal default stack sizes are sufficient, and *none* of the stack patches tried during the chase are needed. (Confirmed: with the Problem 2 fix and zero ntdll stack patches, Rhino launches cleanly and the 32-bit installer completes a full install without overflow.)
 >
 > If you ever see `virtual_setup_exception stack overflow ... bytes` rather than a clean, managed `STATUS_STACK_OVERFLOW` with a stack trace, treat it as a symptom of runaway recursion *somewhere upstream* rather than a sign that stacks need to be bigger — the fix is to find and stop the recursion, not to give it more room to run in.
 
@@ -182,7 +185,6 @@ the test by dropping the locally-built `uxtheme.dll` over the wine builtin.)
 
 | File | Change |
 |------|--------|
-| `dlls/ntdll/unix/thread.c` | Raise WoW64 32-bit stack minimum to 8 MB for .NET 8 CLR bootstrap (32-bit/installer helpers only) |
 | `dlls/uxtheme/uxtheme.spec` + `system.c` | Add the four immersive-color-set exports (ord 95/96/98/100) Rhino resolves for OS dark-mode detection |
 | `dlls/wintrust/wintrust_main.c` | Override Authenticode result to S_OK (Wine lacks MS CA root store needed to verify Microsoft signatures) |
 
@@ -205,9 +207,11 @@ workarounds (keep local to `rhino8-wine`).
   Wine maintainers will likely want real behavior, and ordinal 100's true
   signature/semantics should be pinned down rather than left as a gate-only stub.
 
-- **`thread.c` 8 MB WoW64 stack — app workaround, NOT upstreamable as-is.** Wine
-  honors the PE header stack size (as Windows does); forcing a minimum overrides
-  the binary's own request. Only affects 32-bit/installer helpers here. Keep local.
+- **`thread.c` 8 MB WoW64 stack — REMOVED (2026-06-15).** Only affected the
+  32-bit WoW64 path (the 32-bit Rhino installer). Verified the installer completes
+  a full install on a default 1 MB stack without it, so it was dropped. Was never
+  upstreamable anyway (forcing a minimum overrides the binary's own PE-header
+  stack request, which Wine correctly honors).
 
 - **`virtual.c` AllocationBase clamp — REMOVED (2026-06-15).** It made
   `VirtualQuery` report a deliberately *false* `AllocationBase` so the CLR's
@@ -236,9 +240,9 @@ for future ones.
 
 Rhino 9 WIP bundles/requires the **.NET 10** desktop and ASP.NET Core
 runtimes (`Microsoft.WindowsDesktop.App 10.0.2`, `Microsoft.AspNetCore.App
-10.0.2`), not .NET 8. Despite that major jump, the remaining `ntdll` patch —
-the 8 MB WoW64 stack minimum — is sufficient (the `VirtualQuery` clamp that was
-also present at the time of this testing has since been removed; see Problem 1).
+10.0.2`), not .NET 8. Despite that major jump, **no ntdll stack patches are
+needed at all** — the 8 MB WoW64 minimum and the `VirtualQuery` clamp that were
+present during earlier testing have both since been removed (see Problem 1).
 No new stack-size patch was needed for .NET 10, once the recursion below is
 fixed.
 
@@ -254,8 +258,8 @@ Rhino 9's `rhcommon_c.dll` has the same `RHC_RhOSInDarkMode` JMP-thunk
 (`48 ff 25 ?? ?? ?? ?? cc`) causing the same mutual-recursion stack overflow
 described in Problem 2 above — confirmed by the same opaque
 `err:virtual:virtual_setup_exception stack overflow ... bytes` signature
-(a 1 MB-span stack, i.e. the recursion overflows before our 8 MB WoW64 patch
-would even matter) on launch. The export lives at a different location in
+(a 1 MB-span stack, i.e. the recursion overflows the default stack almost
+immediately) on launch. The export lives at a different location in
 this build:
 
 | | Rhino 8 (8.31.26126.13431) | Rhino 9 WIP (9.0.26160.12305) |
@@ -361,8 +365,6 @@ under a real X11/Wayland session.
   with a months-old build, not a real result. (PE DLLs like `uxtheme.dll` are
   portable and can be swapped; native `.so` cannot.)
 
-- **Also re-test whether the `thread.c` 8 MB installer-stack bump is still
-  needed post-dark-mode-fix.** Both stack patches were developed while chasing
-  the dark-mode recursion; it is plausible the installer's .NET-init overflow was
-  *also* the recursion, not a genuine stack-size need. Worth confirming the
-  installer still runs with the 8 MB minimum removed now that uxtheme is fixed.
+- **`thread.c` 8 MB WoW64 stack — RESOLVED (removed 2026-06-15).** Tested: the
+  32-bit Rhino installer completes a full install on a default 1 MB stack with the
+  bump removed. No ntdll stack patches remain in the tree.
