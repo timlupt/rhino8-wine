@@ -15,7 +15,7 @@ index 546963a4241..121a59836a9 100644
              return status;
          wow_teb->Tib.StackBase = PtrToUlong( stack.StackBase );
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index a2ea5244b9f..8f387b89f6b 100644
+index a2ea5244b9f..20a4c77ff0b 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -4427,7 +4427,7 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
@@ -26,29 +26,6 @@ index a2ea5244b9f..8f387b89f6b 100644
 +        mprotect_range( view->base, 2 * host_page_size, 0, 0 );
      }
      VIRTUAL_DEBUG_DUMP_VIEW( view );
- 
-@@ -5726,6 +5726,22 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
-         if (view->protect & SEC_IMAGE) info->Type = MEM_IMAGE;
-         else if (view->protect & (SEC_FILE | SEC_RESERVE | SEC_COMMIT)) info->Type = MEM_MAPPED;
-         else info->Type = MEM_PRIVATE;
-+
-+        /* Clamp AllocationBase for thread stack regions: report at most 1 MB of
-+         * stack to VirtualQuery callers so the .NET 8 CLR calibrates its
-+         * recursion depth as on Windows (where stacks are typically 1 MB). */
-+        {
-+            TEB *teb = NtCurrentTeb();
-+            if (teb &&
-+                (char *)addr >= (char *)teb->DeallocationStack &&
-+                (char *)addr < (char *)teb->Tib.StackBase)
-+            {
-+                char *clamped = (char *)teb->Tib.StackBase - (1 * 1024 * 1024);
-+                if (clamped > (char *)teb->DeallocationStack &&
-+                    (char *)info->AllocationBase <= (char *)teb->DeallocationStack + host_page_size)
-+                    info->AllocationBase = clamped;
-+            }
-+        }
-     }
-     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
  
 diff --git a/dlls/uxtheme/system.c b/dlls/uxtheme/system.c
 index 8f963115cde..a57674adf41 100644

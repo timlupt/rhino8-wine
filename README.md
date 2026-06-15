@@ -12,9 +12,8 @@ Rhino 8 uses .NET 8 via Microsoft's CLR, which was not working when trying to ru
 
 Patches:
 
-1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine. Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
-2. **.NET calibrates recursion depth from `VirtualQuery`** — if Wine reports a stack larger than 1MB, .NET calibrates aggressively and overflows. Patched `ntdll` to clamp the reported stack size to 1MB.
-3. **Dark mode detection caused 254,955-deep mutual recursion** — Rhino's OS dark-mode probe (`RhOSInDarkMode` in `RhinoCore.dll`) resolves four undocumented `uxtheme.dll` immersive-color exports at runtime; Wine didn't provide them, so the probe fell back to a managed callback that re-entered it, recursing until the stack overflowed. Fixed by adding the missing exports to Wine's `uxtheme` (in `rhino8-wine.patch`) — **no patching of Rhino's own DLLs required.**
+1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine (32-bit installer helpers). Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
+2. **Dark mode detection caused 254,955-deep mutual recursion** — Rhino's OS dark-mode probe (`RhOSInDarkMode` in `RhinoCore.dll`) resolves four undocumented `uxtheme.dll` immersive-color exports at runtime; Wine didn't provide them, so the probe fell back to a managed callback that re-entered it, recursing until the stack overflowed. Fixed by adding the missing exports to Wine's `uxtheme` (in `rhino8-wine.patch`) — **no patching of Rhino's own DLLs required.**
 
 Environment Specific Issues:
 

@@ -20,18 +20,18 @@ if (reserve_size < 8 * 1024 * 1024) reserve_size = 8 * 1024 * 1024;
 
 This applies only to the WoW64 (32-bit) stack path and does not affect native 64-bit threads.
 
-**Defensive fix — Clamp VirtualQuery AllocationBase** (`dlls/ntdll/unix/virtual.c` → `fill_basic_memory_info`):
+**Removed (2026-06-15) — VirtualQuery `AllocationBase` clamp** (`dlls/ntdll/unix/virtual.c` → `fill_basic_memory_info`):
 
-.NET also reads stack size via `VirtualQuery`/`NtQueryVirtualMemory` to calibrate its maximum recursion depth. If Wine reports a stack larger than Windows' typical 1 MB, .NET calibrates aggressively and can overflow. Clamping `AllocationBase` to `StackBase − 1 MB` makes `VirtualQuery` report a 1 MB window regardless of actual reserved size:
-
-```c
-char *clamped = (char *)teb->Tib.StackBase - (1 * 1024 * 1024);
-if (clamped > (char *)teb->DeallocationStack &&
-    (char *)info->AllocationBase <= (char *)teb->DeallocationStack + host_page_size)
-    info->AllocationBase = clamped;
-```
-
-This is a no-op for standard 1 MB stacks (where `clamped == DeallocationStack`) but protects against PE headers that request larger stacks.
+An earlier defensive patch clamped the stack size reported by
+`VirtualQuery`/`NtQueryVirtualMemory` to ~1 MB (by reporting `AllocationBase`
+as `StackBase − 1 MB`), on the theory that .NET calibrates its maximum
+recursion depth from it and could overflow if Wine reported a larger stack.
+After the dark-mode fix (Problem 2) eliminated the only runaway recursion, the
+clamp proved unnecessary: Rhino 8's 64-bit threads already get ~1 MB stacks, so
+it was a near-no-op. It was **removed** — Rhino launches cleanly without it
+(heavier recursion-depth stress testing still pending). It was never
+upstreamable anyway, since it made `VirtualQuery` report a deliberately false
+`AllocationBase`; see the upstreaming-triage section below.
 
 > **A red herring — the opaque `virtual_setup_exception` crash:** While chasing this, a *different*-looking crash sometimes appeared instead of a clean `STATUS_STACK_OVERFLOW`:
 >
@@ -183,7 +183,6 @@ the test by dropping the locally-built `uxtheme.dll` over the wine builtin.)
 | File | Change |
 |------|--------|
 | `dlls/ntdll/unix/thread.c` | Raise WoW64 32-bit stack minimum to 8 MB for .NET 8 CLR bootstrap (32-bit/installer helpers only) |
-| `dlls/ntdll/unix/virtual.c` | Clamp VirtualQuery AllocationBase to report at most 1 MB of stack |
 | `dlls/uxtheme/uxtheme.spec` + `system.c` | Add the four immersive-color-set exports (ord 95/96/98/100) Rhino resolves for OS dark-mode detection |
 | `dlls/wintrust/wintrust_main.c` | Override Authenticode result to S_OK (Wine lacks MS CA root store needed to verify Microsoft signatures) |
 
@@ -210,12 +209,13 @@ workarounds (keep local to `rhino8-wine`).
   honors the PE header stack size (as Windows does); forcing a minimum overrides
   the binary's own request. Only affects 32-bit/installer helpers here. Keep local.
 
-- **`virtual.c` AllocationBase clamp — app workaround, NOT upstreamable.** It makes
+- **`virtual.c` AllocationBase clamp — REMOVED (2026-06-15).** It made
   `VirtualQuery` report a deliberately *false* `AllocationBase` so the CLR's
-  `Thread::GetStackLowerBound()` sees a ~1 MB stack. `VirtualQuery` reporting the
-  truth is correct behavior; lying to it is a band-aid. Likely a leftover of the
-  abandoned 512 MB-stack experiment + the (now-fixed) recursion — **test whether
-  it can be dropped entirely** (see TODO). Keep local either way.
+  `Thread::GetStackLowerBound()` saw a ~1 MB stack — never upstreamable, since
+  `VirtualQuery` reporting the truth is correct behavior. It turned out to be a
+  leftover of the abandoned 512 MB-stack experiment + the (now-fixed) recursion;
+  with the dark-mode fix in place Rhino launches cleanly without it, so it was
+  dropped from the patch (heavier stress testing pending).
 
 So the **only** clean mainline contribution is the `uxtheme` exports. The
 ntdll/wintrust changes are environment/app shims and should stay in this repo's
@@ -236,10 +236,11 @@ for future ones.
 
 Rhino 9 WIP bundles/requires the **.NET 10** desktop and ASP.NET Core
 runtimes (`Microsoft.WindowsDesktop.App 10.0.2`, `Microsoft.AspNetCore.App
-10.0.2`), not .NET 8. Despite that major jump, the existing `ntdll` patches —
-the 8 MB WoW64 stack minimum and the 1 MB `VirtualQuery` clamp — remain
-sufficient. No new stack-size patch was needed for .NET 10, once the
-recursion below is fixed.
+10.0.2`), not .NET 8. Despite that major jump, the remaining `ntdll` patch —
+the 8 MB WoW64 stack minimum — is sufficient (the `VirtualQuery` clamp that was
+also present at the time of this testing has since been removed; see Problem 1).
+No new stack-size patch was needed for .NET 10, once the recursion below is
+fixed.
 
 ### `wintrust` Authenticode patch generalizes
 
@@ -344,23 +345,21 @@ under a real X11/Wayland session.
   `UnregisterClass`/window-teardown bug, or whether a specific Eto/WPF panel
   leaks past shutdown. Deferred.
 
-- **Confirm whether the `virtual.c` VirtualQuery/AllocationBase clamp is still
-  needed.** It may be a vestige of the abandoned 512 MB-stack debugging era +
-  the (now-fixed) dark-mode recursion, rather than a real requirement. See the
-  analysis under "Are the stack patches real Wine bugs?" below. It is *not* an
-  upstreamable Wine fix regardless (it makes VirtualQuery report a deliberately
-  false `AllocationBase`), so this is local-patch hygiene only, not PR-blocking.
+- **`virtual.c` AllocationBase clamp — REMOVED, pending stress validation.**
+  Removed via a full `makepkg` rebuild (2026-06-15); Rhino 8 launches cleanly
+  without it. Still needs heavier real-world exercise (large models, deep
+  booleans/SubD/meshing, scripting) to confirm no legitimate deep-recursion path
+  trips a `StackOverflowException`. If one ever does, restore the clamp hunk
+  (`git show <pre-removal commit>:rhino8-wine.patch`) and `makepkg -sif` — but the
+  "leaner upstream approach" notes apply: don't re-add the VirtualQuery lie;
+  prefer making Wine reserve the true PE-header size.
 
-  **Test method — full `makepkg` rebuild ONLY, never an incremental `.so` swap.**
-  `ntdll.so` is the most ABI-sensitive component in Wine; hot-swapping a
-  hand-rebuilt `ntdll.so` over an existing install crashed the entire native
-  service layer (`services/rpcss/svchost/plugplay/winedevice` all SEGV'd at init)
-  — an artifact of mixing one freshly-built object with a months-old build, not a
-  real result. (PE DLLs like `uxtheme.dll` are portable and *can* be swapped;
-  native `.so` cannot.) Correct procedure: remove the clamp hunk from
-  `rhino8-wine.patch`, `makepkg -si`, then stress-test heavy .NET workloads and
-  check `coredumpctl`. If clean, the clamp is dead weight; if it regresses, see
-  the "leaner upstream approach" notes below.
+  Methodology reminder: native `ntdll.so` changes must be validated with a full
+  `makepkg` rebuild, **never** an incremental `.so` hot-swap. Doing the latter
+  crashed the entire native service layer (`services/rpcss/svchost/plugplay/
+  winedevice` SEGV'd at init) — an artifact of mixing one freshly-built object
+  with a months-old build, not a real result. (PE DLLs like `uxtheme.dll` are
+  portable and can be swapped; native `.so` cannot.)
 
 - **Also re-test whether the `thread.c` 8 MB installer-stack bump is still
   needed post-dark-mode-fix.** Both stack patches were developed while chasing
