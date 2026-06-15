@@ -26,3 +26,10 @@ claude-wine.sh
 # Screenshots (may contain personal info)
 Screenshot_*.png
 !desktop_screenshot.jpeg
+
+# Proprietary Rhino binaries (pulled in only for local disassembly/analysis)
+*.dll
+*.dll.orig
+
+# Local backup/temp files
+*.bak
