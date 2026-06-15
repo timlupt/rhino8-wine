@@ -14,7 +14,7 @@ Patches:
 
 1. **WoW64 32-bit thread stacks too small for .NET 8 CLR bootstrap** — Wine's 1MB default is insufficient for .NET's initialization call depth on Wine. Patched `ntdll` to enforce an 8MB minimum on WoW64 stacks.
 2. **.NET calibrates recursion depth from `VirtualQuery`** — if Wine reports a stack larger than 1MB, .NET calibrates aggressively and overflows. Patched `ntdll` to clamp the reported stack size to 1MB.
-3. **Dark mode detection caused 254,955-deep mutual recursion** — `rhcommon_c.dll`'s `RHC_RhOSInDarkMode` and the managed `get_DarkMode()` called each other indefinitely on Wine. Fixed with a binary patch to make it always return light mode.
+3. **Dark mode detection caused 254,955-deep mutual recursion** — Rhino's OS dark-mode probe (`RhOSInDarkMode` in `RhinoCore.dll`) resolves four undocumented `uxtheme.dll` immersive-color exports at runtime; Wine didn't provide them, so the probe fell back to a managed callback that re-entered it, recursing until the stack overflowed. Fixed by adding the missing exports to Wine's `uxtheme` (in `rhino8-wine.patch`) — **no patching of Rhino's own DLLs required.**
 
 Environment Specific Issues:
 
@@ -130,25 +130,13 @@ WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE RhinoInstaller.exe
 
 The `wintrust` patch (included in `rhino8-wine.patch`) is required for the installer to complete — Wine lacks the Microsoft CA root store needed to verify the installer's Authenticode signatures, and without the patch it fails during package verification.
 
-### 4. Apply the rhcommon_c.dll binary patch
+> **No DLL patching needed.** The dark-mode recursion fix lives in
+> `rhino8-wine.patch` (it adds the missing exports to Wine's `uxtheme`), so
+> Rhino's own `rhcommon_c.dll` is left untouched. If you ever run Rhino under
+> *stock* Wine instead of this patched build, you'd need the binary fallback —
+> see [`find-darkmode-patch.sh`](find-darkmode-patch.sh).
 
-Rhino ships `rhcommon_c.dll` — this file is present after running the Rhino 8 installer. Patch the local copy:
-
-```bash
-DLL="$HOME/.local/share/wineprefixes/rhino8/drive_c/Program Files/Rhino 8/System/rhcommon_c.dll"
-cp "$DLL" "$DLL.bak"
-printf '\x31\xc0\xc3\x90\x90\x90\x90' | \
-    dd of="$DLL" bs=1 seek=$((16#dff50)) conv=notrunc
-```
-
-This replaces the `RHC_RhOSInDarkMode` JMP thunk with `xor eax,eax; ret` (always returns light mode), preventing the mutual recursion crash.
-
-If you're on a different Rhino 8 build and this offset doesn't match (or the
-crash persists), use [`find-darkmode-patch.sh`](find-darkmode-patch.sh) to
-relocate the export and patch it automatically — see the
-[Rhino 9 WIP](#rhino-9-wip-experimental) section below for usage.
-
-### 5. Run Rhino
+### 4. Run Rhino
 
 ```bash
 ./run-rhino.sh
@@ -175,8 +163,12 @@ This kills and restarts the wineserver, resetting the internal HTTP server state
 ## Rhino 9 WIP (Experimental)
 
 The same `wine-rhino8` build also runs the Rhino 9 WIP installer and Rhino 9
-itself — no source patches needed updating. Two extra steps are required
-beyond the Rhino 8 instructions above. Rhino 9 WIP changes frequently; see
+itself — no source patches needed updating. The dark-mode recursion has the
+same root cause as in Rhino 8, so the `uxtheme` fix in `rhino8-wine.patch`
+covers it build-wide; no per-DLL patch is needed (if a newer WIP build still
+trips it, [`find-darkmode-patch.sh`](find-darkmode-patch.sh) remains as a
+binary fallback). One Rhino-9-specific step may be needed beyond the Rhino 8
+instructions above. Rhino 9 WIP changes frequently; see
 [WINE_PORTING_NOTES.md](WINE_PORTING_NOTES.md#rhino-9-wip-experimental) for
 the details and version-specific numbers behind these steps.
 
@@ -194,16 +186,7 @@ WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE wineboot
 WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE /path/to/rhino_9.x.x.x.exe
 ```
 
-### 1. Patch `rhcommon_c.dll` (dark-mode recursion)
-
-Same underlying bug as Rhino 8's dark-mode patch, but at a different offset
-in this DLL build. Use the helper script instead of a hardcoded offset:
-
-```bash
-./find-darkmode-patch.sh "$WINEPREFIX/drive_c/Program Files/Rhino 9 WIP/System/rhcommon_c.dll" --apply
-```
-
-### 2. If viewports render incorrectly, try switching GPU Technology to OpenGL
+### 1. If viewports render incorrectly, try switching GPU Technology to OpenGL
 
 Rhino 9 WIP defaults to Direct3D for viewport rendering. On at least one
 tested system (Nvidia, Wayland/XWayland), this rendered incorrectly under
@@ -213,7 +196,7 @@ platform-dependent (GPU vendor/driver/Vulkan setup), so your mileage may
 vary. If you hit similar symptoms: **Options → View → GPU → GPU Technology →
 OpenGL**, then restart Rhino.
 
-### 3. Run Rhino 9
+### 2. Run Rhino 9
 
 ```bash
 DISPLAY="${DISPLAY:-:0}" WINEPREFIX=$WINEPREFIX $WINE \
