@@ -1,10 +1,9 @@
---- a/dlls/uxtheme/uxtheme.spec	2026-06-15 16:32:00.128344002 +0000
-+++ b/dlls/uxtheme/uxtheme.spec	2026-06-15 16:32:50.582341269 +0000
-@@ -43,6 +43,11 @@
+--- a/dlls/uxtheme/uxtheme.spec	2026-06-18 01:48:20.420174500 +0000
++++ b/dlls/uxtheme/uxtheme.spec	2026-06-18 01:48:47.750173019 +0000
+@@ -43,6 +43,10 @@
  61 stdcall OpenThemeDataEx(ptr wstr long)
  62 stub -noname ServerClearStockObjects
  63 stub -noname MarkSelection
-+94 stdcall -noname GetImmersiveColorSetCount()
 +95 stdcall GetImmersiveColorFromColorSetEx(long long long long)
 +96 stdcall -noname GetImmersiveColorTypeFromName(wstr)
 +98 stdcall GetImmersiveUserColorSetPreference(long long)
@@ -12,24 +11,12 @@
  104 stdcall -noname RefreshImmersiveColorPolicyState()
  132 stdcall -noname ShouldAppsUseDarkMode()
  133 stdcall -noname AllowDarkModeForWindow(ptr long)
---- a/dlls/uxtheme/system.c	2026-06-15 16:32:00.131344002 +0000
-+++ b/dlls/uxtheme/system.c	2026-06-15 16:33:17.312339821 +0000
-@@ -1334,3 +1334,74 @@
+--- a/dlls/uxtheme/system.c	2026-06-18 01:48:20.424174499 +0000
++++ b/dlls/uxtheme/system.c	2026-06-18 01:49:10.486171787 +0000
+@@ -1334,3 +1334,62 @@
      FIXME("%p: stub\n", hwnd);
      return FALSE;
  }
-+
-+/**********************************************************************
-+ *      GetImmersiveColorSetCount                          (UXTHEME.94)
-+ *
-+ * Number of available immersive colour sets. Undocumented; exported by
-+ * ordinal only. Stubbed to one set until the colour-set tables are implemented.
-+ */
-+int WINAPI GetImmersiveColorSetCount(void)
-+{
-+    FIXME("stub\n");
-+    return 1;
-+}
 +
 +/**********************************************************************
 + *      GetImmersiveColorFromColorSetEx                    (UXTHEME.95)
@@ -89,13 +76,12 @@
 +    FIXME("%u: stub\n", index);
 +    return NULL;
 +}
---- a/dlls/uxtheme/tests/system.c	2026-06-15 16:32:00.135344001 +0000
-+++ b/dlls/uxtheme/tests/system.c	2026-06-15 16:35:16.813333347 +0000
-@@ -52,6 +52,11 @@
+--- a/dlls/uxtheme/tests/system.c	2026-06-18 01:48:20.427174499 +0000
++++ b/dlls/uxtheme/tests/system.c	2026-06-18 01:51:08.994165367 +0000
+@@ -52,6 +52,10 @@
  static HRESULT (WINAPI *pGetThemeTransitionDuration)(HTHEME, int, int, int, int, DWORD *);
  static BOOLEAN (WINAPI *pShouldSystemUseDarkMode)(void);
  static BOOLEAN (WINAPI *pShouldAppsUseDarkMode)(void);
-+static int (WINAPI *pGetImmersiveColorSetCount)(void);
 +static DWORD (WINAPI *pGetImmersiveColorFromColorSetEx)(UINT, UINT, BOOL, UINT);
 +static int (WINAPI *pGetImmersiveColorTypeFromName)(const WCHAR *);
 +static int (WINAPI *pGetImmersiveUserColorSetPreference)(BOOL, BOOL);
@@ -103,11 +89,10 @@
  
  static LONG (WINAPI *pDisplayConfigGetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
  static LONG (WINAPI *pDisplayConfigSetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
-@@ -82,6 +87,11 @@
+@@ -82,6 +86,10 @@
      pCloseThemeFile = (void *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(3));
      pShouldSystemUseDarkMode = (void *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(138));
      pShouldAppsUseDarkMode = (void *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(132));
-+    pGetImmersiveColorSetCount = (void *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(94));
 +    pGetImmersiveColorFromColorSetEx = (void *)GetProcAddress(uxtheme, "GetImmersiveColorFromColorSetEx");
 +    pGetImmersiveColorTypeFromName = (void *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(96));
 +    pGetImmersiveUserColorSetPreference = (void *)GetProcAddress(uxtheme, "GetImmersiveUserColorSetPreference");
@@ -115,24 +100,20 @@
  
  #define GET_PROC(module, func)                       \
      p##func = (void *)GetProcAddress(module, #func); \
-@@ -2778,6 +2788,33 @@
+@@ -2778,6 +2786,29 @@
      ok(result == !light_theme, "Expected value %d, got %d\n", !light_theme, result);
  }
  
 +static void test_GetImmersiveColors(void)
 +{
-+    int count, type, pref;
++    int type, pref;
 +
-+    if (!pGetImmersiveColorSetCount || !pGetImmersiveColorFromColorSetEx
-+        || !pGetImmersiveColorTypeFromName || !pGetImmersiveUserColorSetPreference
-+        || !pGetImmersiveColorNamedTypeByIndex)
++    if (!pGetImmersiveColorFromColorSetEx || !pGetImmersiveColorTypeFromName
++        || !pGetImmersiveUserColorSetPreference || !pGetImmersiveColorNamedTypeByIndex)
 +    {
 +        win_skip("Immersive colour set functions are unavailable.\n");
 +        return;
 +    }
-+
-+    count = pGetImmersiveColorSetCount();
-+    ok(count > 0, "Expected at least one colour set, got %d.\n", count);
 +
 +    pref = pGetImmersiveUserColorSetPreference(FALSE, FALSE);
 +    ok(pref >= 0, "Unexpected active colour set %d.\n", pref);
@@ -149,7 +130,7 @@
  static void test_DrawThemeEdge(void)
  {
      HTHEME htheme;
-@@ -2883,6 +2920,7 @@
+@@ -2883,6 +2914,7 @@
      test_theme(FALSE);
      test_ShouldSystemUseDarkMode();
      test_ShouldAppsUseDarkMode();
