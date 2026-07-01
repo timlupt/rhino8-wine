@@ -5,12 +5,8 @@ Clean, simple Nix flake for running Rhino 8 on Linux with Wine.
 ## Quick Install
 
 ```bash
-# Install Rhino
+# Install Rhino (fixes applied automatically)
 nix run github:timlupt/rhino8-wine#install -- ~/Downloads/rhino_*.exe
-
-# Apply fixes (one-time)
-nix run github:timlupt/rhino8-wine#fix-ui-lag
-nix run github:timlupt/rhino8-wine#fix-black-menus
 
 # Run Rhino
 nix run github:timlupt/rhino8-wine#run
@@ -37,18 +33,22 @@ nix run .#yak -- install <package>
 nix run .#yak -- list
 ```
 
-### Fixes
+### Fixes (Optional)
 
-**UI Lag Fix** (must run once):
+Fixes are **automatically applied during installation**. These commands are only needed to re-apply or adjust settings.
+
+**UI Lag Fix** (optional, to adjust throttle interval):
 ```bash
-nix run .#fix-ui-lag
+nix run .#fix-ui-lag           # Default: 50ms
+nix run .#fix-ui-lag -- 25     # Faster: 25ms
+nix run .#fix-ui-lag -- 100    # Slower: 100ms
 ```
 Fixes:
 - Bottom buttons not updating until mouse-over
 - High CPU usage
 - Toolbar icons not appearing
 
-**Black Menus Fix** (must run once):
+**Black Menus Fix** (optional, to re-apply):
 ```bash
 nix run .#fix-black-menus
 ```

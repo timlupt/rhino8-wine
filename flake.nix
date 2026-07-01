@@ -186,8 +186,20 @@
           echo ""
           if [ -f "$WINEPREFIX/drive_c/Program Files/Rhino 8/System/Rhino.exe" ]; then
             echo "✓ Installation complete!"
+            echo ""
+            echo "Applying fixes..."
+
+            # Fix UI lag (50ms MFC throttle)
+            WINEPREFIX="$WINEPREFIX" "$WINE" reg add "HKCU\\Software\\Wine\\X11 Driver" /v "IdleUpdateInterval" /t REG_DWORD /d 50 /f >/dev/null 2>&1
+
+            # Fix black menus (disable WPF hardware acceleration)
+            WINEPREFIX="$WINEPREFIX" "$WINE" reg add "HKCU\\Software\\Microsoft\\Avalon.Graphics" /v "DisableHWAcceleration" /t REG_DWORD /d 1 /f >/dev/null 2>&1
+
+            echo "✓ Fixes applied"
+            echo ""
+            echo "Run with: nix run .#run"
           else
-            echo "⚠ Installation may have failed. Check logs."
+            echo "⚠ Installation failed"
           fi
         '';
 
