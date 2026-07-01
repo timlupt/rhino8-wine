@@ -22,6 +22,62 @@
           ];
         });
 
+        # Run Rhino with optional debug mode
+        run-rhino = pkgs.writeShellScriptBin "run-rhino" ''
+          WINE=${wine-rhino}/bin/wine
+          WINESERVER=${wine-rhino}/bin/wineserver
+          WINEPREFIX="''${WINEPREFIX:-$HOME/.local/share/wineprefixes/rhino8}"
+          RHINO="$WINEPREFIX/drive_c/Program Files/Rhino 8/System/Rhino.exe"
+          LOGDIR="$WINEPREFIX/logs"
+
+          if [ ! -f "$RHINO" ]; then
+            echo "Error: Rhino not installed. Run install-rhino first."
+            exit 1
+          fi
+
+          mkdir -p "$LOGDIR"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+          # Debug mode if --debug flag
+          if [ "$1" = "--debug" ]; then
+            WINEDEBUG="warn+all,+uxtheme,+gdi,+win,+user32"
+            LOGFILE="$LOGDIR/rhino-debug-$TIMESTAMP.log"
+            echo "Debug mode enabled. Log: $LOGFILE"
+            shift
+          else
+            WINEDEBUG="err+all"
+            LOGFILE="$LOGDIR/rhino-$TIMESTAMP.log"
+          fi
+
+          # Force en-US locale (prevents MCP font crashes)
+          export LC_ALL=en_US.UTF-8
+          export LANG=en_US.UTF-8
+
+          # Enable GPU acceleration (AMD/Intel Mesa)
+          export MESA_GL_VERSION_OVERRIDE=4.6
+          export mesa_glthread=true
+
+          echo "Starting Rhino 8..."
+          WINEPREFIX="$WINEPREFIX" WINEDEBUG="$WINEDEBUG" \
+            "$WINE" "$RHINO" "$@" 2>&1 | tee "$LOGFILE"
+
+          # Wait for Wine cleanup
+          echo ""
+          echo "Waiting for Wine processes to terminate..."
+          WAIT=0
+          while WINEPREFIX="$WINEPREFIX" "$WINESERVER" -w 2>/dev/null && [ $WAIT -lt 10 ]; do
+            sleep 1
+            WAIT=$((WAIT + 1))
+          done
+
+          if [ $WAIT -ge 10 ]; then
+            echo "Force terminating Wine..."
+            WINEPREFIX="$WINEPREFIX" "$WINESERVER" -k
+          fi
+
+          echo "✓ Session ended. Log: $LOGFILE"
+        '';
+
         # Install Rhino with progress indicators
         install-rhino = pkgs.writeShellScriptBin "install-rhino" ''
           WINE=${wine-rhino}/bin/wine
@@ -65,11 +121,15 @@
         '';
 
       in {
-        packages.default = wine-rhino;
-        packages.wine-rhino = wine-rhino;
-        packages.install-rhino = install-rhino;
+        packages = {
+          default = wine-rhino;
+          inherit wine-rhino install-rhino run-rhino;
+        };
 
-        apps.install = flake-utils.lib.mkApp { drv = install-rhino; };
+        apps = {
+          install = flake-utils.lib.mkApp { drv = install-rhino; };
+          run = flake-utils.lib.mkApp { drv = run-rhino; };
+        };
       }
     );
 }
