@@ -1,6 +1,11 @@
 {
   description = "Rhino 8 on Linux via Wine with fixes";
 
+  nixConfig = {
+    extra-substituters = [ "https://timlupt-rhino8-wine.cachix.org" ];
+    extra-trusted-public-keys = [ "timlupt-rhino8-wine.cachix.org-1:r8QrgOb0uoFHG2yNZUENz7ZIx8/WqSLIdmefgyHezhs=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";

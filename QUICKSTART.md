@@ -68,12 +68,17 @@ Fixes:
 
 ## Cachix
 
-Pre-built binaries available from Cachix (optional):
+Pre-built binaries **automatically used** from Cachix (no setup needed):
 
 ```bash
-cachix use YOUR_CACHE_NAME
-nix build .#wine-rhino
+# Just build - cache is configured in flake.nix
+nix build github:timlupt/rhino8-wine#wine-rhino
+
+# Or run directly:
+nix run github:timlupt/rhino8-wine#install -- ~/Downloads/rhino_*.exe
 ```
+
+The cache is automatically trusted when you use the flake!
 
 ## GitHub Actions
 
