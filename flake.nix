@@ -22,6 +22,32 @@
           ];
         });
 
+        # Yak package manager for Rhino plugins
+        yak-rhino = pkgs.writeShellScriptBin "yak-rhino" ''
+          WINE=${wine-rhino}/bin/wine
+          WINEPREFIX="''${WINEPREFIX:-$HOME/.local/share/wineprefixes/rhino8}"
+          YAK="$WINEPREFIX/drive_c/Program Files/Rhino 8/System/Yak.exe"
+
+          if [ ! -f "$YAK" ]; then
+            echo "Error: Rhino not installed"
+            exit 1
+          fi
+
+          if [ $# -eq 0 ]; then
+            echo "Yak Package Manager"
+            echo ""
+            echo "Usage: yak-rhino <command> [args]"
+            echo ""
+            echo "Commands:"
+            echo "  search <query>    - Search for packages"
+            echo "  install <package> - Install a package"
+            echo "  list              - List installed packages"
+            exit 0
+          fi
+
+          WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all "$WINE" "$YAK" "$@"
+        '';
+
         # Run Rhino with optional debug mode
         run-rhino = pkgs.writeShellScriptBin "run-rhino" ''
           WINE=${wine-rhino}/bin/wine
@@ -123,12 +149,13 @@
       in {
         packages = {
           default = wine-rhino;
-          inherit wine-rhino install-rhino run-rhino;
+          inherit wine-rhino install-rhino run-rhino yak-rhino;
         };
 
         apps = {
           install = flake-utils.lib.mkApp { drv = install-rhino; };
           run = flake-utils.lib.mkApp { drv = run-rhino; };
+          yak = flake-utils.lib.mkApp { drv = yak-rhino; };
         };
       }
     );
