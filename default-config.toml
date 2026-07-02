@@ -1,0 +1,16 @@
+# Rhino 8 Wine Configuration
+
+[wine]
+prefix = "~/.local/share/wineprefixes/rhino8"
+
+[runtime]
+# Force en-US locale (Wine default)
+locale = "en_US.UTF-8"
+
+# GPU acceleration
+mesa_gl_version = "4.6"
+mesa_glthread = true
+
+# Wine cleanup
+auto_cleanup = true
+cleanup_timeout_sec = 10

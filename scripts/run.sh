@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Run Rhino 8 with Wine
+
+set -euo pipefail
+
+PREFIX="${HOME}/.local/share/wineprefixes/rhino8"
+RHINO_EXE="$PREFIX/drive_c/Program Files/Rhino 8/System/Rhino.exe"
+LOGDIR="$PREFIX/logs"
+mkdir -p "$LOGDIR"
+
+# Check if installed
+if [[ ! -f "$RHINO_EXE" ]]; then
+    echo "Error: Rhino not installed"
+    echo "Install with: nix run .#install -- <installer.exe>"
+    exit 1
+fi
+
+# Parse debug flag
+DEBUG_MODE="normal"
+if [[ "${1:-}" == "--debug" ]]; then
+    DEBUG_MODE="full"
+fi
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+# Set debug level
+if [[ "$DEBUG_MODE" == "full" ]]; then
+    WINEDEBUG="warn+all,+seh,+eventlog,+mscoree"
+    LOGFILE="$LOGDIR/rhino-debug-$TIMESTAMP.log"
+    ERRFILE="$LOGDIR/rhino-debug-stderr-$TIMESTAMP.log"
+    echo "ℹ Full debug mode enabled"
+    echo "ℹ Stdout: $LOGFILE"
+    echo "ℹ Stderr: $ERRFILE"
+else
+    WINEDEBUG="err+all,warn+seh,warn+eventlog"
+    LOGFILE="$LOGDIR/rhino-$TIMESTAMP.log"
+    ERRFILE="$LOGDIR/rhino-stderr-$TIMESTAMP.log"
+fi
+
+# Set environment
+export LC_ALL="en_US.UTF-8"
+export LANG="en_US.UTF-8"
+export MESA_GL_VERSION_OVERRIDE="4.6"
+export mesa_glthread=true
+
+# .NET/WPF compatibility
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0
+export DOTNET_EnableWriteXorExecute=0
+
+# .NET debug in full mode
+if [[ "$DEBUG_MODE" == "full" ]]; then
+    export COREHOST_TRACE=1
+    export COREHOST_TRACEFILE="$LOGDIR/dotnet-trace-$TIMESTAMP.log"
+fi
+
+echo "ℹ Starting Rhino 8..."
+echo ""
+
+# Run Rhino
+WINEPREFIX="$PREFIX" WINEDEBUG="$WINEDEBUG" \
+    wine "$RHINO_EXE" > "$LOGFILE" 2> "$ERRFILE"
+
+# Wait for wine to fully exit
+WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null || true
+sleep 0.5
+
+echo ""
+echo "✓ Session ended"
+echo "ℹ Stdout log: $LOGFILE"
+echo "ℹ Stderr log: $ERRFILE"
+
+# Check for crashes
+if grep -q "FailFast\|Unhandled exception\|Segmentation fault" "$ERRFILE" 2>/dev/null; then
+    echo ""
+    echo "⚠ CRASH DETECTED - Last 50 lines of stderr:"
+    echo "════════════════════════════════════════════════════"
+    tail -50 "$ERRFILE"
+    echo "════════════════════════════════════════════════════"
+fi
