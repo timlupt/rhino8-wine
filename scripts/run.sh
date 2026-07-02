@@ -53,19 +53,41 @@ if [[ "$DEBUG_MODE" == "full" ]]; then
     export COREHOST_TRACEFILE="$LOGDIR/dotnet-trace-$TIMESTAMP.log"
 fi
 
+# Cleanup function to kill all Wine subprocesses
+cleanup() {
+    echo ""
+    echo "ℹ Cleaning up Wine processes..."
+    if [[ -n "${WINE_PID:-}" ]]; then
+        # Kill entire process group (negative PID kills the group)
+        kill -TERM -- -$WINE_PID 2>/dev/null || true
+        sleep 0.5
+        kill -KILL -- -$WINE_PID 2>/dev/null || true
+    fi
+    # Also use wineserver cleanup for this prefix
+    WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null || true
+}
+
+# Register cleanup to run on script exit or interruption
+trap cleanup EXIT INT TERM
+
 echo "ℹ Starting Rhino 8..."
 echo ""
 
-# Run Rhino
+# Run wine in background to enable process group tracking
+set -m  # Enable job control
 WINEPREFIX="$PREFIX" WINEDEBUG="$WINEDEBUG" \
-    wine "$RHINO_EXE" > "$LOGFILE" 2> "$ERRFILE"
+    wine "$RHINO_EXE" > "$LOGFILE" 2> "$ERRFILE" &
+WINE_PID=$!
 
-# Wait for wine to fully exit
-WINEPREFIX="$PREFIX" wineserver -w 2>/dev/null || true
-sleep 0.5
+# Wait for wine to finish (disable errexit for this)
+set +e
+wait $WINE_PID
+WINE_EXIT_CODE=$?
+set -e
 
+# Cleanup happens automatically via trap
 echo ""
-echo "✓ Session ended"
+echo "✓ Rhino exited (code: $WINE_EXIT_CODE)"
 echo "ℹ Stdout log: $LOGFILE"
 echo "ℹ Stderr log: $ERRFILE"
 
