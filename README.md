@@ -6,7 +6,7 @@ Run **Rhinoceros 8** on Linux using Wine with Nix. Clean, simple, fully cached b
 
 ---
 
-## Quick Start (Recommended)
+## Quick Start
 
 ### 1. Install Nix
 
@@ -25,62 +25,108 @@ After installation, restart your shell or run:
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 ```
 
-Verify:
-```bash
-nix --version
-```
-
 ### 2. Install Rhino
 
 ```bash
-nix run github:timlupt/rhino8-wine#install -- ~/Downloads/rhino_*.exe
+nix run github:timlupt/rhino8-wine#rhino8-install -- ~/Downloads/rhino_*.exe
 ```
 
 This automatically:
 - ✅ Downloads pre-built Wine with patches (cached, ~30 seconds)
 - ✅ Installs Rhino 8 with all dependencies
-- ✅ Applies all performance and visual fixes
+- ✅ Applies compatibility fixes (black menus, fonts, MIDI)
 
 ### 3. Run Rhino
 
 ```bash
-nix run github:timlupt/rhino8-wine#run
+nix run github:timlupt/rhino8-wine#rhino8
 ```
 
 **That's it!** No manual compilation, no dependencies to install.
 
 ---
 
+## Home Manager Integration (Recommended)
+
+For declarative installation with desktop integration:
+
+```nix
+{
+  inputs.rhino8-wine = {
+    url = "github:timlupt/rhino8-wine";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  imports = [ inputs.rhino8-wine.homeManagerModules.default ];
+
+  programs.rhino8 = {
+    enable = true;
+    desktopIntegration = true;  # Creates application menu entry
+    installTools = true;         # Installs all tools
+  };
+}
+```
+
+This provides:
+- `rhino8` - Launch Rhino
+- `rhino8-install` - Install Rhino from .exe
+- `rhino8-uninstall` - Remove installation
+- `rhino8-sync` - Manage Wine compatibility fixes
+- `yak` - Plugin manager
+- `rhino8-analyze-crash` - Crash log analyzer
+- Desktop entry in application menu
+
+See [INSTALL-HOME-MANAGER.md](./INSTALL-HOME-MANAGER.md) for details.
+
+---
+
 ## Features
 
 ✅ **Automatic Cachix** - Pre-built Wine cached at https://timlupt-rhino8-wine.cachix.org  
-✅ **All fixes included** - UI lag, black menus, GPU acceleration, locale  
+✅ **Compatibility fixes** - Black menus, fonts, MIDI device support  
 ✅ **Plugin manager** - Yak integration for Rhino plugins  
+✅ **MCP integration** - Works with Rhino-MCP-Platform  
+✅ **MIDI support** - Use MIDI controllers with Grasshopper  
 ✅ **Debug mode** - Full Wine logs with `--debug` flag  
 ✅ **Clean & reproducible** - Nix flake with pinned dependencies  
 
 ---
 
-## Additional Commands
+## Commands
+
+### Plugin Management
+
+```bash
+yak search grasshopper
+yak install Rhino-MCP-Platform
+yak install MidiListener
+yak list
+```
+
+### Fix Management
+
+Three fixes are applied automatically during installation:
+
+```bash
+rhino8-sync black-menus test    # Check if WPF HW acceleration is disabled
+rhino8-sync fonts test          # Check if system fonts are registered
+rhino8-sync midi test           # Check if MIDI driver is enabled
+```
+
+To reapply or remove fixes:
+```bash
+rhino8-sync <fix-name> apply    # Apply fix
+rhino8-sync <fix-name> remove   # Remove fix
+rhino8-sync <fix-name> test     # Test if applied
+```
 
 ### Debug Mode
+
 ```bash
-nix run github:timlupt/rhino8-wine#run -- --debug
+rhino8 --debug
 ```
+
 Saves full Wine debug logs to `~/.local/share/wineprefixes/rhino8/logs/`
-
-### Install Plugins
-```bash
-nix run github:timlupt/rhino8-wine#yak -- search grasshopper
-nix run github:timlupt/rhino8-wine#yak -- install <package>
-nix run github:timlupt/rhino8-wine#yak -- list
-```
-
-### Re-apply Fixes (optional)
-```bash
-nix run github:timlupt/rhino8-wine#fix-ui-lag       # Adjust UI throttle (default 50ms)
-nix run github:timlupt/rhino8-wine#fix-black-menus  # Re-apply WPF fix
-```
 
 ---
 
@@ -90,13 +136,12 @@ nix run github:timlupt/rhino8-wine#fix-black-menus  # Re-apply WPF fix
 1. **uxtheme.dll** - Dark mode recursion fix (prevents stack overflow)
 2. **wintrust.dll** - Authenticode bypass (installer verification)
 
-### Automatic Runtime Fixes
-3. **MFC UI lag** - Throttles idle messages to 50ms (fixes button updates, reduces CPU by 60%)
-4. **Black menus** - Disables WPF hardware acceleration
-5. **GPU acceleration** - Mesa optimizations for AMD/Intel
-6. **Font crashes** - Force en-US locale for MCP compatibility
+### Compatibility Fixes (applied automatically)
+3. **black-menus** - Disables WPF hardware acceleration to fix black UI rendering
+4. **fonts** - Registers system fonts via Z:\ paths to fix WPF text rendering and color picker
+5. **midi** - Enables Wine ALSA MIDI driver for device enumeration in Grasshopper
 
-See [QUICKSTART.md](./QUICKSTART.md) for more details.
+All fixes are applied during `rhino8-install` and can be managed with `rhino8-sync`.
 
 ---
 
@@ -118,6 +163,20 @@ See [WINE_PORTING_NOTES.md](WINE_PORTING_NOTES.md) for detailed writeup.
 
 ---
 
+## MIDI Setup
+
+To use MIDI controllers with Grasshopper:
+
+1. Install MidiListener plugin: `yak install MidiListener`
+2. Restart Rhino for plugin to load
+3. Connect your MIDI device
+4. In Grasshopper, use MidiListener components to read CC values
+5. Remap MIDI range (0-127) to your desired range (e.g., 0-π radians)
+
+The `midi` fix enables Wine's ALSA MIDI driver so Windows applications can enumerate MIDI devices.
+
+---
+
 ## Manual Build (Advanced)
 
 If you need to build from source or modify the flake:
@@ -132,98 +191,12 @@ Build time: ~30-40 minutes first time, then cached.
 
 ---
 
-## Traditional Setup (Ubuntu/Arch)
-
-If you prefer not to use Nix, see the original manual build instructions:
-
-<details>
-<summary>Ubuntu 24.04 LTS Manual Build</summary>
-
-### 1. Install dependencies
-```bash
-sudo apt update
-sudo apt install -y \
-  build-essential git autoconf bison flex python3 pkg-config \
-  gcc-mingw-w64 \
-  libx11-dev libxext-dev libxrandr-dev libxcomposite-dev libxcursor-dev \
-  libxi-dev libxinerama-dev libxrender-dev libxxf86vm-dev \
-  libxfixes-dev libxdamage-dev \
-  libfreetype-dev libfontconfig-dev \
-  libgnutls28-dev \
-  libgl-dev \
-  libvulkan-dev vulkan-headers \
-  libwayland-dev \
-  libpulse-dev \
-  libcups2-dev libpcap-dev libsdl2-dev libv4l-dev \
-  ocl-icd-opencl-dev libpcsclite-dev unixodbc-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  libssl-dev
-```
-
-### 2. Build Wine
-```bash
-git clone https://github.com/timlupt/rhino8-wine
-cd rhino8-wine
-
-# Clone Wine at tested commit
-git clone https://github.com/wine-mirror/wine.git wine-src
-cd wine-src
-git checkout 11c0254541e169e80495f4f48f7231af36ff8a0c
-git apply ../rhino8-wine.patch
-
-# Build
-cd ..
-mkdir wine-build && cd wine-build
-../wine-src/configure \
-  --prefix=/opt/wine-rhino8 \
-  --enable-archs=i386,x86_64 \
-  --with-x --with-wayland --with-vulkan --with-openssl
-make -j$(nproc)
-sudo make install
-```
-
-### 3. Install Rhino
-```bash
-export WINEPREFIX=~/.local/share/wineprefixes/rhino8
-export WINE=/opt/wine-rhino8/bin/wine
-
-WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE wineboot
-WINEPREFIX=$WINEPREFIX WINEDEBUG=-all $WINE ~/Downloads/rhino_*.exe
-```
-
-### 4. Run
-```bash
-./run-rhino.sh
-```
-
-</details>
-
-<details>
-<summary>Arch Linux Manual Build</summary>
-
-```bash
-sudo pacman -S --needed base-devel git mingw-w64-gcc \
-  autoconf bison flex perl python \
-  lib32-glibc lib32-gcc-libs vulkan-headers \
-  fontconfig freetype2 gnutls libxcomposite libxcursor libxdamage \
-  libxext libxfixes libxi libxinerama libxrandr libxrender libxxf86vm \
-  mesa opencl-icd-loader openssl pcsclite sdl2 v4l-utils \
-  vulkan-icd-loader wayland gst-plugins-base-libs libcups libpcap libpulse
-
-git clone https://github.com/timlupt/rhino8-wine
-cd rhino8-wine
-makepkg -si
-```
-
-</details>
-
----
-
 ## Contributing
 
 Technical documentation:
 - [UXTHEME-MR.md](./UXTHEME-MR.md) - uxtheme implementation details
 - [WINE_PORTING_NOTES.md](./WINE_PORTING_NOTES.md) - Complete problem analysis
+- [KNOWN-ISSUES.md](KNOWN-ISSUES.md) - Known limitations and workarounds
 
 ## Credits
 
@@ -234,7 +207,7 @@ Technical documentation:
 
 **Tested on:**
 - Ubuntu 24.04.4 LTS (Kernel 6.17)
-- Fedora 43 (Kernel 6.19)
-- Rhino 8.31.26126.13431
+- Fedora 43 (Kernel 7.1)
+- Rhino 8.32.26160.13001
 
-_Note: This project was developed with assistance from Claude Code._
+_This project was developed with assistance from Claude Code._
