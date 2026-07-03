@@ -63,6 +63,8 @@ cleanup() {
         sleep 0.5
         kill -KILL -- -$WINE_PID 2>/dev/null || true
     fi
+    # Kill crash reporter if it spawned outside the process group
+    pkill -f "RmaErrorReporting.exe" 2>/dev/null || true
     # Also use wineserver cleanup for this prefix
     WINEPREFIX="$PREFIX" wineserver -k 2>/dev/null || true
 }
